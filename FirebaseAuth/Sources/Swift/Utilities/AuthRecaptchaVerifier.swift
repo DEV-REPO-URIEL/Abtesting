@@ -24,23 +24,45 @@
   @available(iOS 13, tvOS 13, macOS 10.15, macCatalyst 13, watchOS 7, *)
   class AuthRecaptchaConfig {
     let siteKey: String
-    let enablementStatus: [String: Bool]
+    let enablementStatus: [AuthRecaptchaProvider: AuthRecaptchaEnablementStatus]
 
-    init(siteKey: String, enablementStatus: [String: Bool]) {
+    init(siteKey: String,
+         enablementStatus: [AuthRecaptchaProvider: AuthRecaptchaEnablementStatus]) {
       self.siteKey = siteKey
       self.enablementStatus = enablementStatus
     }
   }
 
-  enum AuthRecaptchaProvider {
-    case password
+  enum AuthRecaptchaEnablementStatus: String, CaseIterable {
+    case enforce = "ENFORCE"
+    case audit = "AUDIT"
+    case off = "OFF"
+
+    // Convenience property for mapping values
+    var stringValue: String { rawValue }
   }
 
-  enum AuthRecaptchaAction {
+  enum AuthRecaptchaProvider: String, CaseIterable {
+    case password = "EMAIL_PASSWORD_PROVIDER"
+    case phone = "PHONE_PROVIDER"
+
+    // Convenience property for mapping values
+    var stringValue: String { rawValue }
+  }
+    var stringValue: String { rawValue }
+  }
+
+  enum AuthRecaptchaAction: String {
     case defaultAction
     case signInWithPassword
     case getOobCode
     case signUpPassword
+    case sendVerificationCode
+    case startMfaSignin
+    case startMfaEnrollment
+
+    // Convenience property for mapping values
+    var stringValue: String { rawValue }
   }
 
   @available(iOS 13, tvOS 13, macOS 10.15, macCatalyst 13, watchOS 7, *)
@@ -51,10 +73,6 @@
     private(set) var recaptchaClient: RCARecaptchaClientProtocol?
 
     private static let _shared = AuthRecaptchaVerifier()
-    private let providerToStringMap = [AuthRecaptchaProvider.password: "EMAIL_PASSWORD_PROVIDER"]
-    private let actionToStringMap = [AuthRecaptchaAction.signInWithPassword: "signInWithPassword",
-                                     AuthRecaptchaAction.getOobCode: "getOobCode",
-                                     AuthRecaptchaAction.signUpPassword: "signUpPassword"]
     private let kRecaptchaVersion = "RECAPTCHA_ENTERPRISE"
     private init() {}
 
@@ -77,22 +95,17 @@
       return agentConfig?.siteKey
     }
 
-    func enablementStatus(forProvider provider: AuthRecaptchaProvider) -> Bool {
-      guard let providerString = providerToStringMap[provider] else {
-        return false
-      }
-      if let tenantID = auth?.tenantID {
-        guard let tenantConfig = tenantConfigs[tenantID],
-              let status = tenantConfig.enablementStatus[providerString] else {
-          return false
-        }
+    func enablementStatus(forProvider provider: AuthRecaptchaProvider)
+      -> AuthRecaptchaEnablementStatus {
+      if let tenantID = auth?.tenantID,
+         let tenantConfig = tenantConfigs[tenantID],
+         let status = tenantConfig.enablementStatus[provider] {
+        return status
+      } else if let agentConfig = agentConfig,
+                let status = agentConfig.enablementStatus[provider] {
         return status
       } else {
-        guard let agentConfig,
-              let status = agentConfig.enablementStatus[providerString] else {
-          return false
-        }
-        return status
+        return AuthRecaptchaEnablementStatus.off
       }
     }
 
@@ -101,7 +114,7 @@
       guard let siteKey = siteKey() else {
         throw AuthErrorUtils.recaptchaSiteKeyMissing()
       }
-      let actionString = actionToStringMap[action] ?? ""
+      let actionString = action.stringValue
       return try await withCheckedThrowingContinuation { continuation in
         FIRRecaptchaGetToken(siteKey, actionString,
                              "NO_RECAPTCHA") { (token: String, error: Error?,
@@ -157,19 +170,16 @@
         throw AuthErrorUtils.error(code: .recaptchaNotEnabled, message: "Invalid siteKey")
       }
       let siteKey = keys[3]
-      var enablementStatus: [String: Bool] = [:]
+      var enablementStatus: [AuthRecaptchaProvider: AuthRecaptchaEnablementStatus] = [:]
       if let enforcementState = response.enforcementState {
         for state in enforcementState {
-          if let provider = state["provider"],
-             provider == providerToStringMap[AuthRecaptchaProvider.password] {
-            if let enforcement = state["enforcementState"] {
-              if enforcement == "ENFORCE" || enforcement == "AUDIT" {
-                enablementStatus[provider] = true
-              } else if enforcement == "OFF" {
-                enablementStatus[provider] = false
-              }
-            }
+          guard let providerString = state["provider"] as? String,
+                let enforcementString = state["enforcementState"] as? String,
+                let provider = AuthRecaptchaProvider(rawValue: providerString),
+                let enforcement = AuthRecaptchaEnablementStatus(rawValue: enforcementString) else {
+            continue // Skip to the next state in the loop
           }
+          enablementStatus[provider] = enforcement
         }
       }
       let config = AuthRecaptchaConfig(siteKey: siteKey, enablementStatus: enablementStatus)
@@ -185,7 +195,7 @@
                                provider: AuthRecaptchaProvider,
                                action: AuthRecaptchaAction) async throws {
       try await retrieveRecaptchaConfig(forceRefresh: false)
-      if enablementStatus(forProvider: provider) {
+      if enablementStatus(forProvider: provider) != .off {
         let token = try await verify(forceRefresh: false, action: action)
         request.injectRecaptchaFields(recaptchaResponse: token, recaptchaVersion: kRecaptchaVersion)
       } else {
