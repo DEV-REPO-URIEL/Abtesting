@@ -1319,7 +1319,10 @@ let package = Package(
     ),
     .testTarget(
       name: "FirebaseVertexAIIntegration",
-      dependencies: ["FirebaseVertexAI"],
+      dependencies: [
+        "FirebaseAppCheck",
+        "FirebaseVertexAI",
+      ],
       path: "FirebaseVertexAI/Tests/Integration",
       resources: [
         .process("Resources"),
