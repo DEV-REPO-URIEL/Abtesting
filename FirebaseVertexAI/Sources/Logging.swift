@@ -12,8 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import FirebaseSharedSwift
 import Foundation
 import OSLog
+
+extension FirebaseLogger {
+  static let vertexAI = FirebaseLogger(category: "[FirebaseVertexAI]", categoryIdentifier: "VTX")
+}
+
+/// Enum of log messages.
+enum LogMessageID: Int {
+  case loadRequestError = 1
+  case loadRequestErrorResponse
+  case loadRequestStreamError
+  case loadRequestStreamErrorResponse
+  case loadRequestStreamLine
+  case appCheckTokenFetchError
+  case nonHTTPResponseError
+  case mlServiceDisabledError
+  case jsonResponseError
+  case jsonDecodingError
+  case curlCommandForRequest
+}
 
 @available(iOS 15.0, macOS 11.0, macCatalyst 15.0, tvOS 15.0, watchOS 8.0, *)
 struct Logging {
